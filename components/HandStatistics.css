@@ -1,0 +1,88 @@
+.hand-statistics-container {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  min-width: 300px;
+  max-width: 400px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  font-family: 'Courier New', monospace;
+}
+
+.hand-statistics-container h2 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  border-bottom: 2px solid #4ecdc4;
+  padding-bottom: 8px;
+}
+
+.hand-section {
+  margin-bottom: 20px;
+}
+
+.hand-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #4ecdc4;
+}
+
+.no-hand {
+  color: #888;
+  font-style: italic;
+  margin: 8px 0;
+}
+
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+}
+
+.stat-label {
+  color: #aaa;
+  font-weight: bold;
+}
+
+.stat-value {
+  color: #fff;
+  text-align: right;
+  word-break: break-all;
+}
+
+.stat-value.gesture-palm {
+  color: #4ecdc4;
+  font-weight: bold;
+}
+
+.stat-value.gesture-fist {
+  color: #ff6b6b;
+  font-weight: bold;
+}
+
+.stat-value.gesture-pinch {
+  color: #ffe66d;
+  font-weight: bold;
+}
+
+.stat-value.gesture-unknown {
+  color: #888;
+}
+
+.stat-sub-item {
+  padding-left: 20px;
+  font-size: 11px;
+}

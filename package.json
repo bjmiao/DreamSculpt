@@ -12,6 +12,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "@google/genai": "^1.40.0",
+    "@mediapipe/camera_utils": "^0.3",
+    "@mediapipe/hands": "^0.4",
     "three": "^0.150.1"
   },
   "devDependencies": {

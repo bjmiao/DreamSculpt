@@ -55,7 +55,7 @@ export class GestureTracker {
         
         // Calculate palm center
         const wrist = landmarks[0];
-        const center = { x: landmarks[9].x, y: landmarks[9].y };
+        const center = { x: 1 - landmarks[9].x, y: landmarks[9].y };
         const palmSize = Math.sqrt(Math.pow(wrist.x - landmarks[9].x, 2) + Math.pow(wrist.y - landmarks[9].y, 2));
 
         const isFist = landmarks.slice(8, 21).every((lm: any) => {

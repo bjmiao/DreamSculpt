@@ -28,6 +28,18 @@ const WORLD_Z_RESPAWN = 20;
 const OBJECT_Z_WRAP = 150;
 /** Materialize effect: fraction of total points revealed per second (e.g. 0.1 = 10% per second) */
 const MATERIALIZE_RATE_PER_SEC = 0.1;
+/** Orbit: yaw limit ±85°, pitch limit ±45° (radians). */
+const YAW_MIN = -(85 * Math.PI) / 180;
+const YAW_MAX = (85 * Math.PI) / 180;
+const PITCH_MIN = -(45 * Math.PI) / 180;
+const PITCH_MAX = (45 * Math.PI) / 180;
+/** Orbit: max rotation per frame (radians) to limit rotation speed. */
+const ORBIT_MAX_YAW_PER_FRAME = 0.04;
+const ORBIT_MAX_PITCH_PER_FRAME = 0.04;
+/** Dolly: max movement per frame to limit zoom speed. */
+const DOLLY_MAX_PER_FRAME = 0.15;
+/** Default point size; highlighted object uses this multiplier. */
+const HIGHLIGHT_SIZE_MULT = 1.5;
 
 export class DreamRenderer {
   public scene: THREE.Scene;
@@ -45,6 +57,10 @@ export class DreamRenderer {
   private readonly TEXTURE_FADE_DURATION = 2.5; // seconds
   private movingWorld: THREE.Group;
   private _forward = new THREE.Vector3();
+  private _projVec = new THREE.Vector3();
+  private _ndcVec = new THREE.Vector3();
+  private selectedObjectId: string | null = null;
+  private readonly defaultPointSize = 0.08;
 
   constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
@@ -88,9 +104,10 @@ export class DreamRenderer {
   }
 
   public async updateScene(graph: SceneGraph, skyUrl?: string, terrainUrl?: string) {
-    // Clear old objects
+    // Clear old objects and selection
     this.movingWorld.clear();
     this.objects.clear();
+    this.selectedObjectId = null;
 
     this.textureFadeProgress = 0;
 
@@ -214,13 +231,77 @@ export class DreamRenderer {
   }
 
   public orbitCamera(yaw: number, pitch: number) {
-    this.cameraRig.rotation.y += yaw;
-    this.cameraRig.rotation.x += pitch;
+    const clampedYaw = Math.max(-ORBIT_MAX_YAW_PER_FRAME, Math.min(ORBIT_MAX_YAW_PER_FRAME, yaw));
+    const clampedPitch = Math.max(-ORBIT_MAX_PITCH_PER_FRAME, Math.min(ORBIT_MAX_PITCH_PER_FRAME, pitch));
+    this.cameraRig.rotation.y = Math.max(YAW_MIN, Math.min(YAW_MAX, this.cameraRig.rotation.y + clampedYaw));
+    this.cameraRig.rotation.x = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.cameraRig.rotation.x + clampedPitch));
   }
 
   public dollyCamera(delta: number) {
+    const clamped = Math.max(-DOLLY_MAX_PER_FRAME, Math.min(DOLLY_MAX_PER_FRAME, delta));
     this.camera.getWorldDirection(this._forward).negate();
-    this.cameraRig.position.addScaledVector(this._forward, delta);
+    this.cameraRig.position.addScaledVector(this._forward, clamped);
+  }
+
+  /** Set which object is selected; updates highlight (point size). Pass null to clear. */
+  public setSelectedObjectId(id: string | null): void {
+    if (this.selectedObjectId === id) return;
+    if (this.selectedObjectId) {
+      const prev = this.objects.get(this.selectedObjectId);
+      if (prev?.mesh.material instanceof THREE.PointsMaterial) {
+        prev.mesh.material.size = this.defaultPointSize;
+      }
+    }
+    this.selectedObjectId = id;
+    if (id) {
+      const obj = this.objects.get(id);
+      if (obj?.mesh.material instanceof THREE.PointsMaterial) {
+        obj.mesh.material.size = this.defaultPointSize * HIGHLIGHT_SIZE_MULT;
+      }
+    }
+  }
+
+  public getSelectedObjectId(): string | null {
+    return this.selectedObjectId;
+  }
+
+  /**
+   * Find the object whose screen projection is closest to normalized (0–1) screen point.
+   * Uses camera and movingWorld children; returns object id or null.
+   */
+  public findClosestObjectAtScreenPoint(normalizedX: number, normalizedY: number): string | null {
+    const children = this.movingWorld.children;
+    if (children.length === 0) return null;
+    const camera = this.camera;
+    let bestId: string | null = null;
+    let bestDistSq = Infinity;
+    // NDC: x,y in [-1,1], y up in NDC
+    const targetX = normalizedX * 2 - 1;
+    const targetY = 1 - normalizedY * 2;
+    for (const child of children) {
+      const id = (child.userData as { id?: string }).id;
+      if (!id) continue;
+      child.getWorldPosition(this._projVec);
+      this._projVec.project(camera);
+      const dx = this._projVec.x - targetX;
+      const dy = this._projVec.y - targetY;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDistSq) {
+        bestDistSq = d2;
+        bestId = id;
+      }
+    }
+    return bestId;
+  }
+
+  /**
+   * Restart the materialize/diffuse effect for an object (reset visible points so they re-reveal).
+   */
+  public triggerDiffuse(objectId: string): void {
+    const obj = this.objects.get(objectId);
+    if (!obj) return;
+    obj.currentPoints = 0;
+    obj.mesh.geometry.setDrawRange(0, 0);
   }
 
   private animate() {
