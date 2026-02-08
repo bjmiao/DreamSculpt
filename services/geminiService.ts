@@ -11,8 +11,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+const DEBUG_DISABLE_GEMINI = true;
 
+let ai: GoogleGenAI | null = null;
+if (!DEBUG_DISABLE_GEMINI) {
+  ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+} else {
+  ai = null;
+}
 
 /** Low-cost classification: is the prompt a scene description (sky/terrain/atmosphere) or a list of objects? */
 export type PromptKind = "scene" | "object";
@@ -106,60 +112,64 @@ export const parseScenePrompt = async (prompt: string): Promise<SceneGraph> => {
 };
 
 export const generateSkyTexture = async (ambience: string): Promise<string> => {
-  // const response = await ai.models.generateContent({
-  //   model: 'gemini-2.5-flash-image',
-  //   contents: {
-  //     parts: [{ text: `A surreal, dreamy, ethereal sky texture for a ${ambience} scene. High resolution, vibrant but soft colors, nebula-like.` }]
-  //   },
-  //   config: {
-  //     imageConfig: { aspectRatio: "16:9" }
-  //   }
-  // });
+  if (!DEBUG_DISABLE_GEMINI) {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [{ text: `A surreal, dreamy, ethereal sky texture for a ${ambience} scene. High resolution, vibrant but soft colors, nebula-like.` }]
+      },
+      config: {
+        imageConfig: { aspectRatio: "16:9" }
+      }
+    });
 
-  // for (const part of response.candidates?.[0]?.content?.parts || []) {
-  //   if (part.inlineData) {
-  //     return `data:image/png;base64,${part.inlineData.data}`;
-  //   }
-  // }
-  // return '';
-
-  // TODO: This is temparay sample image
-  const imageURL = "https://i.imgur.com/Pl9PnXf.png";
-  // load the image from the URL
-  const image = await fetch(imageURL);
-  const imageData = await image.arrayBuffer();
-  const base64Image = arrayBufferToBase64(imageData);
-
-  const partData = {
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:image/png;base64,${part.inlineData.data}`;
+      }
+    }
+    return '';
+  } else {
+    
+    // TODO: This is temparay sample image
+    const imageURL = "https://i.imgur.com/Glzh0By.png";
+    // load the image from the URL
+    const image = await fetch(imageURL);
+    const imageData = await image.arrayBuffer();
+    const base64Image = arrayBufferToBase64(imageData);
+    
+    const partData = {
       inlineData: { 
         "mimeType": "image/png",
         "data": base64Image
       }
     };
-  return `data:${partData.inlineData.mimeType};base64,${partData.inlineData.data}`;
+    return `data:${partData.inlineData.mimeType};base64,${partData.inlineData.data}`;
+  }
 };
 
 export const generateTerrainTexture = async (ambience: string): Promise<string> => {
-  // const response = await ai.models.generateContent({
-  //   model: 'gemini-2.5-flash-image',
-  //   contents: {
-  //     parts: [{ text: `A seamless tiled ground texture for a ${ambience} dream world. Subtle patterns, glowing veins, or soft textures.` }]
-  //   },
-  //   config: {
-  //     imageConfig: { aspectRatio: "1:1" }
-  //   }
-  // });
+  if (!DEBUG_DISABLE_GEMINI) {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [{ text: `A seamless tiled ground texture for a ${ambience} dream world. Subtle patterns, glowing veins, or soft textures.` }]
+      },
+      config: {
+        imageConfig: { aspectRatio: "1:1" }
+      }
+    });
 
-  // for (const part of response.candidates?.[0]?.content?.parts || []) {
-  //   if (part.inlineData) {
-  //     return `data:image/png;base64,${part.inlineData.data}`;
-  //   }
-  // }
-  // return '';
-
-  // TODO: This is temparay sample image
-  const imageURL = "https://i.imgur.com/3j2AKil.jpeg";
-    // load the image from the URL
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:image/png;base64,${part.inlineData.data}`;
+      }
+    }
+    return '';
+  } else {
+    // TODO: This is temparay sample image
+    const imageURL = "https://i.imgur.com/kaUgiz6.jpeg";
+      // load the image from the URL
     const image = await fetch(imageURL);
     const imageData = await image.arrayBuffer();
     const base64Image = arrayBufferToBase64(imageData);
@@ -171,4 +181,5 @@ export const generateTerrainTexture = async (ambience: string): Promise<string> 
         }
     };
     return `data:${partData.inlineData.mimeType};base64,${partData.inlineData.data}`;
+  }
 };

@@ -53,6 +53,11 @@ export class DreamRenderer {
   private sky: THREE.Mesh | null = null;
   private skyMat: THREE.MeshBasicMaterial | null = null;
   private terrainMat: THREE.MeshStandardMaterial | null = null;
+  /** Previous sky/terrain meshes and materials for crossfade (fade out old, fade in new). */
+  private lastSky: THREE.Mesh | null = null;
+  private lastTerrain: THREE.Mesh | null = null;
+  private lastSkyMat: THREE.MeshBasicMaterial | null = null;
+  private lastTerrainMat: THREE.MeshStandardMaterial | null = null;
   private textureFadeProgress = 0; // 0..1, animated in animate()
   private readonly TEXTURE_FADE_DURATION = 2.5; // seconds
   private movingWorld: THREE.Group;
@@ -104,7 +109,8 @@ export class DreamRenderer {
   }
 
   /**
-   * Set or replace sky and terrain only. Fade-in is animated in the render loop.
+   * Update sky and terrain images/colors only. Does not remove or replace meshes; only updates materials.
+   * If sky/terrain do not exist yet, creates them. Fade-in is animated in the render loop.
    */
   public setSkyAndTerrain(
     skyColor: string,
@@ -112,16 +118,13 @@ export class DreamRenderer {
     skyUrl?: string,
     terrainUrl?: string
   ): void {
-    if (this.sky) {
-      this.worldGroup.remove(this.sky);
-      this.sky = null;
-    }
-    if (this.terrain) {
-      this.worldGroup.remove(this.terrain);
-      this.terrain = null;
-    }
     this.textureFadeProgress = 0;
 
+    if (this.sky && this.skyMat) {
+      this.lastSky = this.sky;
+      this.lastSkyMat = this.skyMat;
+      this.lastSkyMat.opacity = 1;
+    }
     const skyGeo = new THREE.SphereGeometry(500, 32, 32);
     this.skyMat = new THREE.MeshBasicMaterial({
       color: skyColor,
@@ -133,13 +136,18 @@ export class DreamRenderer {
     this.sky = new THREE.Mesh(skyGeo, this.skyMat);
     this.worldGroup.add(this.sky);
 
-    const terrainGeo = new THREE.PlaneGeometry(2050, 2050, 10, 10);
     const terrainTex = terrainUrl ? new THREE.TextureLoader().load(terrainUrl) : null;
     if (terrainTex) {
       terrainTex.wrapS = THREE.RepeatWrapping;
       terrainTex.wrapT = THREE.RepeatWrapping;
       terrainTex.repeat.set(105, 105);
     }
+    if (this.terrain && this.terrainMat) {
+      this.lastTerrain = this.terrain;
+      this.lastTerrainMat = this.terrainMat;
+      this.lastTerrainMat.opacity = 1;
+    }
+    const terrainGeo = new THREE.PlaneGeometry(2050, 2050, 10, 10);
     this.terrainMat = new THREE.MeshStandardMaterial({
       color: terrainColor,
       map: terrainTex,
@@ -330,15 +338,33 @@ export class DreamRenderer {
   private animate() {
     requestAnimationFrame(this.animate.bind(this));
     const delta = this.clock.getDelta();
-
-    // Gradual fade-in of sky and terrain textures (gradient opacity)
-    if (this.textureFadeProgress < 1 && (this.skyMat || this.terrainMat)) {
+    
+    // Crossfade: fade out old sky/terrain, fade in new
+    const hasTransition = this.textureFadeProgress < 1 && (this.skyMat || this.terrainMat || this.lastSkyMat || this.lastTerrainMat);
+    if (hasTransition) {
       this.textureFadeProgress = Math.min(1, this.textureFadeProgress + delta / this.TEXTURE_FADE_DURATION);
       const t = this.textureFadeProgress;
       const ease = t * t * (3 - 2 * t); // smoothstep
-      const opacity = ease;
-      if (this.skyMat) this.skyMat.opacity = opacity;
-      if (this.terrainMat) this.terrainMat.opacity = opacity;
+      if (this.skyMat) this.skyMat.opacity = ease;
+      if (this.terrainMat) this.terrainMat.opacity = ease;
+      if (this.lastSkyMat) this.lastSkyMat.opacity = 1 - ease;
+      if (this.lastTerrainMat) this.lastTerrainMat.opacity = 1 - ease;
+      if (this.textureFadeProgress >= 1) {
+        if (this.lastSky) {
+          this.worldGroup.remove(this.lastSky);
+          this.lastSky.geometry?.dispose();
+          this.lastSkyMat?.dispose();
+          this.lastSky = null;
+          this.lastSkyMat = null;
+        }
+        if (this.lastTerrain) {
+          this.worldGroup.remove(this.lastTerrain);
+          this.lastTerrain.geometry?.dispose();
+          this.lastTerrainMat?.dispose();
+          this.lastTerrain = null;
+          this.lastTerrainMat = null;
+        }
+      }
     }
 
     // Simulated forward motion: camera is static; the world moves backward.

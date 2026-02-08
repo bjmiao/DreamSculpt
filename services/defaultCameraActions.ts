@@ -72,6 +72,7 @@ export class PalmReleaseAction extends CameraAction {
 
   execute(ctx: CameraActionContext): void {
     const { renderer } = ctx;
+    console.log("PalmReleaseAction");
     // const id = renderer.getSelectedObjectId();
     // if (id) renderer.triggerDiffuse(id);
     // renderer.setSelectedObjectId(null);

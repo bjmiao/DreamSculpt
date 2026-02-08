@@ -105,17 +105,10 @@ const App: React.FC = () => {
           skyUrl,
           terrainUrl,
         }));
-        const scene: SceneGraph = {
-          ambience,
-          terrainColor: '#FFFFFF',
-          skyColor: '#FFFFFF',
-          objects: [],
-        };
+        const terrainColor = '#FFFFFF';
+        const skyColor = '#FFFFFF';
         if (rendererRef.current) {
-          await rendererRef.current.setSkyAndTerrain(scene.skyColor, scene.terrainColor, skyUrl, terrainUrl);
-        }
-        if (rendererRef.current) {
-          await rendererRef.current.addObjects(scene.objects);
+          await rendererRef.current.setSkyAndTerrain(skyColor, terrainColor, skyUrl, terrainUrl);
         }
         setState(prev => ({ ...prev, isGenerating: false, statusMessage: `Now dreaming: ${ambience.slice(0, 50)}...` }));
         return;
@@ -141,7 +134,7 @@ const App: React.FC = () => {
           terrainUrl,
         }));
       }
-       
+
       if (rendererRef.current) {
         await rendererRef.current.addObjects(scene.objects);
       }
