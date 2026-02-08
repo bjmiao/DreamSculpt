@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { SceneGraph } from "../types";
 
 /** Convert ArrayBuffer to base64 string (browser-safe, no Node Buffer). */
@@ -12,7 +11,49 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+
+
+/** Low-cost classification: is the prompt a scene description (sky/terrain/atmosphere) or a list of objects? */
+export type PromptKind = "scene" | "object";
+
+export const classifyPrompt = async (prompt: string): Promise<PromptKind> => {
+  if (prompt.includes("scene")) return "scene";
+  return "object";
+  //   const response = await ai.models.generateContent({
+//     model: "gemini-2.0-flash",
+//     contents: {
+//       parts: [{
+//         text: `You are a classifier. Reply with exactly one word: "scene" or "object".
+// - "scene": the user describes an environment, atmosphere, sky, terrain, or overall mood (e.g. "sunset over mountains", "neon cyberpunk city sky").
+// - "object": the user describes a list of things, items, or objects to place in a scene (e.g. "a red tree and a blue sphere", "three crystals and a tower").
+
+// User input: "${prompt.slice(0, 500)}"
+
+// Reply only: scene OR object`
+//       }]
+//     },
+//     config: { maxOutputTokens: 10 }
+//   });
+//   let raw = (response as { text?: string }).text?.trim().toLowerCase() ?? "";
+//   if (!raw && response.candidates?.[0]?.content?.parts?.[0]) {
+//     const part = response.candidates[0].content.parts[0];
+//     raw = ((part as { text?: string }).text ?? "").trim().toLowerCase();
+//   }
+//   if (raw.includes("object")) return "object";
+//   return "scene";
+};
+
+// /** Convert ArrayBuffer to base64 string (browser-safe, no Node Buffer). */
+// function arrayBufferToBase64(buffer: ArrayBuffer): string {
+//   const bytes = new Uint8Array(buffer);
+//   let binary = "";
+//   for (let i = 0; i < bytes.byteLength; i++) {
+//     binary += String.fromCharCode(bytes[i]);
+//   }
+//   return btoa(binary);
+// }
+
 
 export const parseScenePrompt = async (prompt: string): Promise<SceneGraph> => {
   // const response = await ai.models.generateContent({
@@ -80,21 +121,22 @@ export const generateSkyTexture = async (ambience: string): Promise<string> => {
   //     return `data:image/png;base64,${part.inlineData.data}`;
   //   }
   // }
-
-    const imageURL = "https://i.imgur.com/Pl9PnXf.png";
-    // load the image from the URL
-    const image = await fetch(imageURL);
-    const imageData = await image.arrayBuffer();
-    const base64Image = arrayBufferToBase64(imageData);
-
-    const partData = {
-        inlineData: { 
-          "mimeType": "image/png",
-          "data": base64Image
-        }
-      };
-      return `data:${partData.inlineData.mimeType};base64,${partData.inlineData.data}`;
   // return '';
+
+  // TODO: This is temparay sample image
+  const imageURL = "https://i.imgur.com/Pl9PnXf.png";
+  // load the image from the URL
+  const image = await fetch(imageURL);
+  const imageData = await image.arrayBuffer();
+  const base64Image = arrayBufferToBase64(imageData);
+
+  const partData = {
+      inlineData: { 
+        "mimeType": "image/png",
+        "data": base64Image
+      }
+    };
+  return `data:${partData.inlineData.mimeType};base64,${partData.inlineData.data}`;
 };
 
 export const generateTerrainTexture = async (ambience: string): Promise<string> => {
@@ -114,6 +156,8 @@ export const generateTerrainTexture = async (ambience: string): Promise<string> 
   //   }
   // }
   // return '';
+
+  // TODO: This is temparay sample image
   const imageURL = "https://i.imgur.com/3j2AKil.jpeg";
     // load the image from the URL
     const image = await fetch(imageURL);

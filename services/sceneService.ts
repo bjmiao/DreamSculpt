@@ -103,27 +103,36 @@ export class DreamRenderer {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  public async updateScene(graph: SceneGraph, skyUrl?: string, terrainUrl?: string) {
-    // Clear old objects and selection
-    this.movingWorld.clear();
-    this.objects.clear();
-    this.selectedObjectId = null;
-
+  /**
+   * Set or replace sky and terrain only. Fade-in is animated in the render loop.
+   */
+  public setSkyAndTerrain(
+    skyColor: string,
+    terrainColor: string,
+    skyUrl?: string,
+    terrainUrl?: string
+  ): void {
+    if (this.sky) {
+      this.worldGroup.remove(this.sky);
+      this.sky = null;
+    }
+    if (this.terrain) {
+      this.worldGroup.remove(this.terrain);
+      this.terrain = null;
+    }
     this.textureFadeProgress = 0;
 
-    // Create Sky — start transparent, fade in in animate()
     const skyGeo = new THREE.SphereGeometry(500, 32, 32);
     this.skyMat = new THREE.MeshBasicMaterial({
-      color: graph.skyColor,
+      color: skyColor,
       side: THREE.BackSide,
       map: skyUrl ? new THREE.TextureLoader().load(skyUrl) : null,
       transparent: true,
-      opacity: 0
+      opacity: 0,
     });
     this.sky = new THREE.Mesh(skyGeo, this.skyMat);
     this.worldGroup.add(this.sky);
 
-    // Create Terrain — start transparent, fade in in animate()
     const terrainGeo = new THREE.PlaneGeometry(2050, 2050, 10, 10);
     const terrainTex = terrainUrl ? new THREE.TextureLoader().load(terrainUrl) : null;
     if (terrainTex) {
@@ -132,22 +141,36 @@ export class DreamRenderer {
       terrainTex.repeat.set(105, 105);
     }
     this.terrainMat = new THREE.MeshStandardMaterial({
-      color: graph.terrainColor,
+      color: terrainColor,
       map: terrainTex,
       roughness: 0.8,
       metalness: 0.2,
       transparent: true,
-      opacity: 0
+      opacity: 0,
     });
     this.terrain = new THREE.Mesh(terrainGeo, this.terrainMat);
     this.terrain.rotation.x = -Math.PI / 2;
     this.worldGroup.add(this.terrain);
+  }
 
-    // Create Objects (async: PLY models load and then materialize gradually)
+  /**
+   * Add (or replace) scene objects only. Clears existing objects, then loads and adds the given list.
+   */
+  public async addObjects(objects: DreamObject[]): Promise<void> {
+    this.movingWorld.clear();
+    this.objects.clear();
+    this.selectedObjectId = null;
+
+    if (objects.length === 0) return;
+
     const plyLoader = new PLYLoader();
-    await Promise.all(
-      graph.objects.map((obj) => this.createPointCloudObject(obj, plyLoader))
-    );
+    await Promise.all(objects.map((obj) => this.createPointCloudObject(obj, plyLoader)));
+  }
+
+  /** Convenience: set sky/terrain and add objects in one call (same as before). */
+  public async updateScene(graph: SceneGraph, skyUrl?: string, terrainUrl?: string): Promise<void> {
+    this.setSkyAndTerrain(graph.skyColor, graph.terrainColor, skyUrl, terrainUrl);
+    await this.addObjects(graph.objects);
   }
 
   private async createPointCloudObject(data: DreamObject, plyLoader: PLYLoader): Promise<void> {

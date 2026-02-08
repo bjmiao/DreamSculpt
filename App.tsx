@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { parseScenePrompt, generateSkyTexture, generateTerrainTexture } from './services/geminiService';
+import { classifyPrompt, parseScenePrompt, generateSkyTexture, generateTerrainTexture } from './services/geminiService';
 import { DreamRenderer } from './services/sceneService';
 import { GestureTracker } from './services/gestureService';
 import { CameraActionManager } from './services/CameraActionManager';
@@ -27,6 +27,8 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     isGenerating: false,
     statusMessage: 'Ready to dream...',
+    skyUrl: null,
+    terrainUrl: null,
     scene: null,
     cameraSpeed: 1,
     handStats: {}
@@ -82,22 +84,68 @@ const App: React.FC = () => {
 
   const handleGenerate = useCallback(async (promptOverride?: string) => {
     const raw = promptOverride !== undefined ? promptOverride : prompt;
-    console.log("raw", raw);
-    console.log("promptOverride", promptOverride);
     const text = typeof raw === 'string' ? raw.trim() : String(raw).trim();
     if (!text || state.isGenerating) return;
-    setState(prev => ({ ...prev, isGenerating: true, statusMessage: 'Parsing your imagination...' }));
+
+    setPrompt(text);
+    setState(prev => ({ ...prev, isGenerating: true, statusMessage: 'Classifying prompt...' }));
+
     try {
+      const kind = await classifyPrompt(text);
+      console.log("kind", kind);
+      if (kind === 'scene') {
+        setState(prev => ({ ...prev, statusMessage: 'Generating sky & terrain...' }));
+        const ambience = text.slice(0, 300);
+        const [skyUrl, terrainUrl] = await Promise.all([
+          generateSkyTexture(ambience),
+          generateTerrainTexture(ambience),
+        ]);
+        setState(prev => ({
+          ...prev,
+          skyUrl,
+          terrainUrl,
+        }));
+        const scene: SceneGraph = {
+          ambience,
+          terrainColor: '#FFFFFF',
+          skyColor: '#FFFFFF',
+          objects: [],
+        };
+        if (rendererRef.current) {
+          await rendererRef.current.setSkyAndTerrain(scene.skyColor, scene.terrainColor, skyUrl, terrainUrl);
+        }
+        if (rendererRef.current) {
+          await rendererRef.current.addObjects(scene.objects);
+        }
+        setState(prev => ({ ...prev, isGenerating: false, statusMessage: `Now dreaming: ${ambience.slice(0, 50)}...` }));
+        return;
+      }
+
+      setState(prev => ({ ...prev, statusMessage: 'Parsing objects...' }));
       const scene = await parseScenePrompt(text);
       setState(prev => ({ ...prev, statusMessage: 'Generating ethereal textures...' }));
 
-      const skyUrl = await generateSkyTexture(scene.ambience);
-      const terrainUrl = await generateTerrainTexture(scene.ambience);
-
+      // use the previous skyURL and terrainUrl
+      if (!state.skyUrl || !state.terrainUrl) {
+        console.log("Generating new textures");
+        const [skyUrl, terrainUrl] = await Promise.all([
+          generateSkyTexture(text),
+          generateTerrainTexture(text),
+      ]);
       if (rendererRef.current) {
-        await rendererRef.current.updateScene(scene, skyUrl, terrainUrl);
+          await rendererRef.current.setSkyAndTerrain(scene.skyColor, scene.terrainColor, state.skyUrl, state.terrainUrl);
       }
-
+      setState(prev => ({
+          ...prev,
+          skyUrl,
+          terrainUrl,
+        }));
+      }
+       
+      if (rendererRef.current) {
+        await rendererRef.current.addObjects(scene.objects);
+      }
+      
       setState(prev => ({
         ...prev,
         scene,
