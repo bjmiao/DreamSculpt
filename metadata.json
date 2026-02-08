@@ -1,0 +1,7 @@
+{
+  "name": "Dreamy Scene Visualizer",
+  "description": "A voice/text-driven immersive experience that visualizes described scenes in a dreamy point-cloud aesthetic, controllable via real-time hand gestures and hand tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
