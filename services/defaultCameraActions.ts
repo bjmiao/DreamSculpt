@@ -1,4 +1,3 @@
-import { transferableAbortController } from 'util';
 import { CameraAction } from './CameraAction';
 import type { CameraActionContext } from './CameraAction';
 
@@ -87,6 +86,7 @@ export class TwoHandPinchScaleAction extends CameraAction {
   readonly hand = 'both' as const;
 
   execute(ctx: CameraActionContext): void {
+    console.log('TwoHandPinchScaleAction');
     const { renderer, leftHand, rightHand, lastTwoHandDistance } = ctx;
     const id = renderer.getSelectedObjectId();
     if (!id || !leftHand || !rightHand || lastTwoHandDistance == null || lastTwoHandDistance <= 0) return;

@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { classifyPrompt, parseScenePrompt, generateSkyTexture, generateTerrainTexture } from './services/geminiService';
 import { DreamRenderer } from './services/sceneService';
-import { GestureTracker } from './services/gestureService';
 import { CameraActionManager } from './services/CameraActionManager';
 import {
   OrbitCameraAction,
@@ -15,7 +14,38 @@ import { GalaxyParticles } from './components/GalaxyParticles';
 import { HandMonitor } from './components/HandMonitor';
 import HandStatistics, { HandData } from './components/HandStatistics';
 import { useHandTracking } from './services/handTrackingService';
-import { AppState, SceneGraph } from './types';
+import { AppState, SceneGraph, HandStats } from './types';
+
+/** Convert HandData from handTrackingService to HandStats for CameraActionManager and UI. */
+function handDataToHandStats(handData: HandData): { left?: HandStats; right?: HandStats } {
+  const out: { left?: HandStats; right?: HandStats } = {};
+  const mapGesture = (g: string) =>
+    g === 'palm' ? 'Open Palm' : g === 'fist' ? 'Fist' : g === 'pinch' ? 'Pinch' : 'Open Palm';
+  for (const side of ['left', 'right'] as const) {
+    const hand = handData[side];
+    if (!hand) continue;
+    const thumb = hand.landmarks[4];
+    const index = hand.landmarks[8];
+    const distance = thumb && index
+      ? Math.sqrt(
+          (thumb.x - index.x) ** 2 + (thumb.y - index.y) ** 2 + (thumb.z - index.z) ** 2
+        )
+      : 0;
+    const handedness = (hand.handedness === 'Left' || hand.handedness === 'Right'
+      ? hand.handedness
+      : side === 'left' ? 'Left' : 'Right') as 'Left' | 'Right';
+    const stat: HandStats = {
+      gesture: mapGesture(hand.gesture),
+      palmSize: hand.palmSize,
+      center: hand.palmCenter,
+      landmarks: hand.landmarks,
+      distance,
+      handedness,
+    };
+    out[side] = stat;
+  }
+  return out;
+}
 
 const SpeechRecognitionCtor =
   typeof window !== 'undefined' &&
@@ -31,22 +61,31 @@ const App: React.FC = () => {
     terrainUrl: null,
     scene: null,
     cameraSpeed: 1,
-    handStats: {}
   });
 
   const recognitionRef = useRef<InstanceType<NonNullable<typeof SpeechRecognitionCtor>> | null>(null);
   const voiceTranscriptRef = useRef('');
   const rendererRef = useRef<DreamRenderer | null>(null);
-  const gestureTrackerRef = useRef<GestureTracker | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraActionManagerRef = useRef<CameraActionManager | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fpsUpdateRef = useRef(0);
   const { handData, isTracking } = useHandTracking(videoRef, canvasRef);
+
+  const handStats = useMemo(() => handDataToHandStats(handData), [handData]);
 
   useEffect(() => {
     if (containerRef.current && !rendererRef.current) {
-      rendererRef.current = new DreamRenderer(containerRef.current);
+      rendererRef.current = new DreamRenderer(containerRef.current, {
+        onFpsUpdate: (fps) => {
+          const now = Date.now();
+          if (now - fpsUpdateRef.current >= 200) {
+            fpsUpdateRef.current = now;
+            setState((prev) => ({ ...prev, fps }));
+          }
+        },
+      });
     }
 
     if (!cameraActionManagerRef.current) {
@@ -59,28 +98,15 @@ const App: React.FC = () => {
       manager.register(new TwoHandPinchScaleAction());
       cameraActionManagerRef.current = manager;
     }
-
-    const startGestures = () => {
-      const video = document.getElementById('input_video') as HTMLVideoElement;
-      if (video && !gestureTrackerRef.current) {
-        gestureTrackerRef.current = new GestureTracker(video, (stats) => {
-          setState((prev) => ({ ...prev, handStats: stats }));
-        });
-        gestureTrackerRef.current.start();
-      }
-    };
-
-    const timer = setTimeout(startGestures, 1000);
-    return () => clearTimeout(timer);
   }, []);
 
-  // Hand gesture → scene: delegate to CameraActionManager
+  // Hand gesture → scene: delegate to CameraActionManager (handStats from handTrackingService)
   useEffect(() => {
     const renderer = rendererRef.current;
     const manager = cameraActionManagerRef.current;
     if (!renderer || !manager) return;
-    manager.process(state.handStats, state.scene, renderer);
-  }, [state.handStats, state.scene]);
+    manager.process(handStats, state.scene, renderer);
+  }, [handStats, state.scene]);
 
   const handleGenerate = useCallback(async (promptOverride?: string) => {
     const raw = promptOverride !== undefined ? promptOverride : prompt;
@@ -118,22 +144,22 @@ const App: React.FC = () => {
       const scene = await parseScenePrompt(text);
       setState(prev => ({ ...prev, statusMessage: 'Generating ethereal textures...' }));
 
-      // use the previous skyURL and terrainUrl
-      if (!state.skyUrl || !state.terrainUrl) {
-        console.log("Generating new textures");
-        const [skyUrl, terrainUrl] = await Promise.all([
-          generateSkyTexture(text),
-          generateTerrainTexture(text),
-      ]);
-      if (rendererRef.current) {
-          await rendererRef.current.setSkyAndTerrain(scene.skyColor, scene.terrainColor, state.skyUrl, state.terrainUrl);
-      }
-      setState(prev => ({
-          ...prev,
-          skyUrl,
-          terrainUrl,
-        }));
-      }
+      // // use the previous skyURL and terrainUrl
+      // if (!state.skyUrl || !state.terrainUrl) {
+      //   console.log("Generating new textures");
+      //   const [skyUrl, terrainUrl] = await Promise.all([
+      //     generateSkyTexture(text),
+      //     generateTerrainTexture(text),
+      // ]);
+      // if (rendererRef.current) {
+      //     await rendererRef.current.setSkyAndTerrain(scene.skyColor, scene.terrainColor, state.skyUrl, state.terrainUrl);
+      // }
+      // setState(prev => ({
+      //     ...prev,
+      //     skyUrl,
+      //     terrainUrl,
+      //   }));
+      // }
 
       if (rendererRef.current) {
         await rendererRef.current.addObjects(scene.objects);
@@ -263,6 +289,13 @@ const App: React.FC = () => {
       {/* UI Elements */}
       <HandMonitor videoRef={videoRef} canvasRef={canvasRef} isTracking={isTracking} />
 
+      {/* FPS */}
+      {state.fps != null && (
+        <div className="fixed top-3 right-3 text-white/80 text-sm font-mono tabular-nums pointer-events-none select-none">
+          {state.fps} FPS
+        </div>
+      )}
+
       {/* Crosshair Overlay */}
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-20">
           <div className="w-12 h-12 border border-white rounded-full flex items-center justify-center">
@@ -270,22 +303,22 @@ const App: React.FC = () => {
           </div>
       </div>
 
-      {/* Hand Cursors */}
-      {state.handStats.left && (
+      {/* Hand Cursors (from handTrackingService) */}
+      {handStats.left && (
           <div 
             className="fixed w-4 h-4 rounded-full bg-blue-400/50 border border-blue-200 pointer-events-none blur-[1px]"
             style={{ 
-                left: `${state.handStats.left.center.x * 100}%`, 
-                top: `${state.handStats.left.center.y * 100}%` 
+                left: `${handStats.left.center.x * 100}%`, 
+                top: `${handStats.left.center.y * 100}%` 
             }}
           />
       )}
-      {state.handStats.right && (
+      {handStats.right && (
           <div 
             className="fixed w-4 h-4 rounded-full bg-purple-400/50 border border-purple-200 pointer-events-none blur-[1px]"
             style={{ 
-                left: `${state.handStats.right.center.x * 100}%`, 
-                top: `${state.handStats.right.center.y * 100}%` 
+                left: `${handStats.right.center.x * 100}%`, 
+                top: `${handStats.right.center.y * 100}%` 
             }}
           />
       )}

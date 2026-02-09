@@ -41,8 +41,9 @@ export class CameraActionManager {
   }
 
   /**
-   * Run all actions that match the current hand gestures.
-   * Updates highlight from left-hand projection when left hand is present.
+   * Priority (high to low):
+   * (1) Left hand available → manipulation only: left-hand actions + two-hand pinch scale. Right-hand navigation disabled.
+   * (2) Left hand not available → right hand does navigation (orbit by palm, dolly by fist).
    */
   process(
     handStats: HandStatsInput,
@@ -51,8 +52,9 @@ export class CameraActionManager {
   ): void {
     const left = handStats.left;
     const right = handStats.right;
+    const manipulationMode = !!left;
 
-    // Left hand: update closest-object highlight from projection
+    // --- Highlight: from left hand when present ---
     if (left) {
       const closestId = renderer.findClosestObjectAtScreenPoint(left.center.x, left.center.y);
       renderer.setSelectedObjectId(closestId);
@@ -60,7 +62,7 @@ export class CameraActionManager {
       renderer.setSelectedObjectId(null);
     }
 
-    // Two-hand actions (both hands present)
+    // --- Priority 1: Two-hand manipulation (both hands) — pinch to scale ---
     if (left && right) {
       const dist = Math.hypot(right.center.x - left.center.x, right.center.y - left.center.y);
       const ctx: CameraActionContext = {
@@ -76,9 +78,7 @@ export class CameraActionManager {
       this.lastTwoHandDistance = dist;
       for (const action of this.actions) {
         if (action.hand !== 'both') continue;
-        const leftGesture = left.gesture;
-        const rightGesture = right.gesture;
-        if (action.gesture === 'Pinch+Pinch' && leftGesture === 'Pinch' && rightGesture === 'Pinch') {
+        if (left.gesture === 'Pinch' && right.gesture === 'Pinch' && action.gesture === 'Pinch+Pinch') {
           action.execute(ctx);
         }
       }
@@ -86,17 +86,7 @@ export class CameraActionManager {
       this.lastTwoHandDistance = 0;
     }
 
-    // Single-hand: right
-    if (right) {
-      const delta = {
-        x: right.center.x - this.lastRight.x,
-        y: right.center.y - this.lastRight.y,
-      };
-      this.runMatching('right', right, delta, this.lastRight, scene, renderer, left, right);
-      this.lastRight = { x: right.center.x, y: right.center.y };
-    }
-
-    // Single-hand: left
+    // --- Priority 1: Left-hand manipulation (when left is available) ---
     if (left) {
       const delta = {
         x: left.center.x - this.lastLeft.x,
@@ -105,11 +95,22 @@ export class CameraActionManager {
       const ctxWithAngle = { lastLeftAngle: this.lastLeftAngle };
       this.runMatching('left', left, delta, this.lastLeft, scene, renderer, left, right, ctxWithAngle);
       this.lastLeft = { x: left.center.x, y: left.center.y };
-      // Update angle for next frame (index tip 8, wrist 0)
       const lm = left.landmarks;
-      if (lm && lm[8] != null && lm[0] != null) {
+      if (lm?.[8] != null && lm?.[0] != null) {
         this.lastLeftAngle = Math.atan2(lm[8].y - lm[0].y, lm[8].x - lm[0].x);
       }
+    }
+
+    // --- Priority 2: Right-hand navigation only when left hand is NOT available ---
+    if (right && !manipulationMode) {
+      const delta = {
+        x: right.center.x - this.lastRight.x,
+        y: right.center.y - this.lastRight.y,
+      };
+      this.runMatching('right', right, delta, this.lastRight, scene, renderer, left, right);
+    }
+    if (right) {
+      this.lastRight = { x: right.center.x, y: right.center.y };
     }
   }
 
@@ -138,6 +139,7 @@ export class CameraActionManager {
 
     for (const action of this.actions) {
       if (action.hand !== hand || action.gesture !== handData.gesture) continue;
+      console.log('Executing action:', action.hand, action.gesture);
       action.execute(ctx);
     }
   }

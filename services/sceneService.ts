@@ -28,6 +28,12 @@ const WORLD_Z_RESPAWN = 20;
 const OBJECT_Z_WRAP = 150;
 /** Materialize effect: fraction of total points revealed per second (e.g. 0.1 = 10% per second) */
 const MATERIALIZE_RATE_PER_SEC = 0.1;
+/** Delay (seconds) after load before particles start diffusing (random movement). */
+const DIFFUSE_DELAY = 1;
+/** Per-frame random displacement scale for diffusion. */
+const DIFFUSE_STRENGTH = 0.05;
+/** Pull back toward original position per frame (0–1) so the cloud doesn’t drift away. */
+const DIFFUSE_DAMP = 0.008;
 /** Orbit: yaw limit ±85°, pitch limit ±45° (radians). */
 const YAW_MIN = -(85 * Math.PI) / 180;
 const YAW_MAX = (85 * Math.PI) / 180;
@@ -40,6 +46,27 @@ const ORBIT_MAX_PITCH_PER_FRAME = 0.04;
 const DOLLY_MAX_PER_FRAME = 0.15;
 /** Default point size; highlighted object uses this multiplier. */
 const HIGHLIGHT_SIZE_MULT = 1.5;
+/** Particle size in world units (spherical/circular points to avoid square overlap). */
+const POINT_SIZE = 0.04;
+
+/** Create a texture with circular alpha so points render as spheres (no square overlap). */
+function createCirclePointTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.7, 'rgba(255,255,255,0.4)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
 
 export class DreamRenderer {
   public scene: THREE.Scene;
@@ -48,7 +75,14 @@ export class DreamRenderer {
   private clock: THREE.Clock;
   private cameraRig: THREE.Group;
   private worldGroup: THREE.Group;
-  private objects: Map<string, { mesh: THREE.Points, targetPoints: number, currentPoints: number }> = new Map();
+  private objects: Map<string, {
+    mesh: THREE.Points;
+    targetPoints: number;
+    currentPoints: number;
+    loadedAt: number;
+    diffuseEnabled?: boolean;
+    originalPositions?: Float32Array;
+  }> = new Map();
   private terrain: THREE.Mesh | null = null;
   private sky: THREE.Mesh | null = null;
   private skyMat: THREE.MeshBasicMaterial | null = null;
@@ -65,9 +99,13 @@ export class DreamRenderer {
   private _projVec = new THREE.Vector3();
   private _ndcVec = new THREE.Vector3();
   private selectedObjectId: string | null = null;
-  private readonly defaultPointSize = 0.08;
+  private readonly defaultPointSize = POINT_SIZE;
+  private static circlePointTexture: THREE.CanvasTexture | null = null;
+  private onFpsUpdate?: (fps: number) => void;
+  private smoothedFps = 0;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, options?: { onFpsUpdate?: (fps: number) => void }) {
+    this.onFpsUpdate = options?.onFpsUpdate;
     this.scene = new THREE.Scene();
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -140,7 +178,7 @@ export class DreamRenderer {
     if (terrainTex) {
       terrainTex.wrapS = THREE.RepeatWrapping;
       terrainTex.wrapT = THREE.RepeatWrapping;
-      terrainTex.repeat.set(105, 105);
+      terrainTex.repeat.set(505, 505);
     }
     if (this.terrain && this.terrainMat) {
       this.lastTerrain = this.terrain;
@@ -209,13 +247,18 @@ export class DreamRenderer {
     }
 
     const hasVertexColors = geometry.getAttribute('color') != null;
+    if (!DreamRenderer.circlePointTexture) {
+      DreamRenderer.circlePointTexture = createCirclePointTexture();
+    }
     const material = new THREE.PointsMaterial({
       color: data.color,
-      size: 0.08,
+      size: POINT_SIZE,
+      map: DreamRenderer.circlePointTexture,
       transparent: true,
       opacity: 0.8,
       blending: THREE.AdditiveBlending,
       vertexColors: hasVertexColors,
+      alphaTest: 0.01,
     });
 
     const cloud = new THREE.Points(geometry, material);
@@ -229,6 +272,7 @@ export class DreamRenderer {
       mesh: cloud,
       targetPoints: pointCount,
       currentPoints: 0,
+      loadedAt: this.clock.getElapsedTime(),
     });
   }
 
@@ -291,7 +335,7 @@ export class DreamRenderer {
       }
     }
   }
-
+      
   public getSelectedObjectId(): string | null {
     return this.selectedObjectId;
   }
@@ -338,7 +382,11 @@ export class DreamRenderer {
   private animate() {
     requestAnimationFrame(this.animate.bind(this));
     const delta = this.clock.getDelta();
-    
+    if (this.onFpsUpdate && delta > 0) {
+      const instantFps = 1 / delta;
+      this.smoothedFps = this.smoothedFps ? this.smoothedFps * 0.85 + instantFps * 0.15 : instantFps;
+      this.onFpsUpdate(Math.round(this.smoothedFps));
+    }
     // Crossfade: fade out old sky/terrain, fade in new
     const hasTransition = this.textureFadeProgress < 1 && (this.skyMat || this.terrainMat || this.lastSkyMat || this.lastTerrainMat);
     if (hasTransition) {
@@ -387,6 +435,36 @@ export class DreamRenderer {
         );
         obj.mesh.geometry.setDrawRange(0, Math.floor(obj.currentPoints));
       }
+    });
+
+    // Diffusion: after DIFFUSE_DELAY seconds, particles get small random movement (then damp back toward original)
+    const now = this.clock.getElapsedTime();
+    this.objects.forEach((obj) => {
+      if (now - obj.loadedAt < DIFFUSE_DELAY) return;
+      const geo = obj.mesh.geometry;
+      const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+      if (!posAttr || posAttr.count === 0) return;
+      if (!obj.diffuseEnabled) {
+        obj.originalPositions = new Float32Array(posAttr.array.length);
+        obj.originalPositions.set(posAttr.array);
+        obj.diffuseEnabled = true;
+      }
+      const orig = obj.originalPositions!;
+      const arr = posAttr.array as Float32Array;
+      const n = posAttr.count * 3;
+      for (let i = 0; i < n; i += 30) {
+        arr[i] += (i*10009 % 1003 - 500) / 500 * DIFFUSE_STRENGTH;
+        arr[i + 1] += ((i+1)*10037 % 1003 ) /  500 * DIFFUSE_STRENGTH;
+        arr[i + 2] += ((i+2)*10007 % 1003 - 500) / 500 * DIFFUSE_STRENGTH;
+
+        // arr[i] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
+        // arr[i + 1] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
+        // arr[i + 2] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
+        arr[i] = orig[i] + (arr[i] - orig[i]) * (1 - DIFFUSE_DAMP);
+        arr[i + 1] = orig[i + 1] + (arr[i + 1] - orig[i + 1]) * (1 - DIFFUSE_DAMP);
+        arr[i + 2] = orig[i + 2] + (arr[i + 2] - orig[i + 2]) * (1 - DIFFUSE_DAMP);
+      }
+      posAttr.needsUpdate = true;
     });
 
     this.renderer.render(this.scene, this.camera);

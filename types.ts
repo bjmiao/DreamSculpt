@@ -31,8 +31,6 @@ export interface AppState {
   statusMessage: string;
   scene: SceneGraph | null;
   cameraSpeed: number;
-  handStats: {
-    left?: HandStats;
-    right?: HandStats;
-  };
+  /** Current FPS (updated periodically from render loop). */
+  fps?: number;
 }

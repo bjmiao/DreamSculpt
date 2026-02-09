@@ -360,7 +360,7 @@ function calculatePalmCenter(landmarks: any[]): { x: number; y: number } {
   )
   
   return {
-    x: sum.x / palmLandmarks.length,
+    x: 1 - sum.x / palmLandmarks.length,
     y: sum.y / palmLandmarks.length
   }
 }
