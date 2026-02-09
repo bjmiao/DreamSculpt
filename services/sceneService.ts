@@ -11,29 +11,29 @@ import sakuraTreePly from '../res/point-cloud-files/sakura-tree.ply?url';
 import schoolBusPly from '../res/point-cloud-files/school-bus.ply?url';
 
 /** Map object type to PLY file URL. Types matching filenames (e.g. 'sakura-tree') or aliases (e.g. 'tree') use local point clouds. */
-const TYPE_TO_PLY: Record<string, string> = {
-  tree: sakuraTreePly,
+export const TYPE_TO_PLY: Record<string, string> = {
+  'tree': sakuraTreePly,
   'sakura-tree': sakuraTreePly,
-  cloud: rainbowPly,
-  rainbow: rainbowPly,
-  mushroom: grassPly,
-  grass: grassPly,
+  'rainbow': rainbowPly,
+  'grass': grassPly,
   'bell-tower': bellTowerPly,
-  church: churchPly,
+  'church': churchPly,
   'school-bus': schoolBusPly,
 };
 
 const FORWARD_SPEED = 0.05;
 const WORLD_Z_RESPAWN = 20;
 const OBJECT_Z_WRAP = 150;
-/** Materialize effect: fraction of total points revealed per second (e.g. 0.1 = 10% per second) */
-const MATERIALIZE_RATE_PER_SEC = 0.1;
-/** Delay (seconds) after load before particles start diffusing (random movement). */
-const DIFFUSE_DELAY = 1;
 /** Per-frame random displacement scale for diffusion. */
-const DIFFUSE_STRENGTH = 0.05;
+const DIFFUSE_STRENGTH = 0.1;
 /** Pull back toward original position per frame (0–1) so the cloud doesn’t drift away. */
 const DIFFUSE_DAMP = 0.008;
+/** Materialize: reveal all particles over this many seconds. */
+const MATERIALIZE_DURATION = 10;
+/** Fraction of particles (0–1) that enter the diffusion phase. */
+const DIFFUSE_FRACTION = 0.1;
+/** Duration (seconds) of the diffusion phase; then those particles disappear. */
+const DIFFUSE_PHASE_DURATION = 3;
 /** Orbit: yaw limit ±85°, pitch limit ±45° (radians). */
 const YAW_MIN = -(85 * Math.PI) / 180;
 const YAW_MAX = (85 * Math.PI) / 180;
@@ -80,8 +80,12 @@ export class DreamRenderer {
     targetPoints: number;
     currentPoints: number;
     loadedAt: number;
-    diffuseEnabled?: boolean;
-    originalPositions?: Float32Array;
+    /** When the "10% diffuse" phase started (after materialize settled). */
+    diffusionPhaseStartedAt?: number;
+    /** First vertex index of the diffusing 10% (last 10% of points). */
+    diffusingStartIndex?: number;
+    /** Snapshot of positions for the diffusing segment only (for damp). */
+    originalPositionsDiffuse?: Float32Array;
   }> = new Map();
   private terrain: THREE.Mesh | null = null;
   private sky: THREE.Mesh | null = null;
@@ -203,8 +207,8 @@ export class DreamRenderer {
    * Add (or replace) scene objects only. Clears existing objects, then loads and adds the given list.
    */
   public async addObjects(objects: DreamObject[]): Promise<void> {
-    this.movingWorld.clear();
-    this.objects.clear();
+    // this.movingWorld.clear();
+    // this.objects.clear();
     this.selectedObjectId = null;
 
     if (objects.length === 0) return;
@@ -370,12 +374,15 @@ export class DreamRenderer {
   }
 
   /**
-   * Restart the materialize/diffuse effect for an object (reset visible points so they re-reveal).
+   * Restart the materialize effect for an object (reset visible points so they re-reveal over MATERIALIZE_DURATION).
    */
   public triggerDiffuse(objectId: string): void {
     const obj = this.objects.get(objectId);
     if (!obj) return;
     obj.currentPoints = 0;
+    obj.diffusionPhaseStartedAt = undefined;
+    obj.diffusingStartIndex = undefined;
+    obj.originalPositionsDiffuse = undefined;
     obj.mesh.geometry.setDrawRange(0, 0);
   }
 
@@ -426,46 +433,65 @@ export class DreamRenderer {
       });
     }
 
-    // Materializing effect: reveal points at MATERIALIZE_RATE_PER_SEC (e.g. 10%) per second
+    const now = this.clock.getElapsedTime();
+
+    // Phase 1: Materialize — gradually show all particles over MATERIALIZE_DURATION (10 seconds)
     this.objects.forEach((obj) => {
       if (obj.currentPoints < obj.targetPoints) {
-        obj.currentPoints = Math.min(
-          obj.targetPoints,
-          obj.currentPoints + obj.targetPoints * MATERIALIZE_RATE_PER_SEC * delta
-        );
+        const rate = obj.targetPoints / MATERIALIZE_DURATION;
+        obj.currentPoints = Math.min(obj.targetPoints, obj.currentPoints + rate * delta);
         obj.mesh.geometry.setDrawRange(0, Math.floor(obj.currentPoints));
       }
     });
 
-    // Diffusion: after DIFFUSE_DELAY seconds, particles get small random movement (then damp back toward original)
-    const now = this.clock.getElapsedTime();
-    this.objects.forEach((obj) => {
-      if (now - obj.loadedAt < DIFFUSE_DELAY) return;
+    // Phase 2 & 3: After settled, 10% of particles diffuse for DIFFUSE_PHASE_DURATION (3s), then disappear
+    for (const [, obj] of this.objects.entries()) {
       const geo = obj.mesh.geometry;
       const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
-      if (!posAttr || posAttr.count === 0) return;
-      if (!obj.diffuseEnabled) {
-        obj.originalPositions = new Float32Array(posAttr.array.length);
-        obj.originalPositions.set(posAttr.array);
-        obj.diffuseEnabled = true;
-      }
-      const orig = obj.originalPositions!;
-      const arr = posAttr.array as Float32Array;
-      const n = posAttr.count * 3;
-      for (let i = 0; i < n; i += 30) {
-        arr[i] += (i*10009 % 1003 - 500) / 500 * DIFFUSE_STRENGTH;
-        arr[i + 1] += ((i+1)*10037 % 1003 ) /  500 * DIFFUSE_STRENGTH;
-        arr[i + 2] += ((i+2)*10007 % 1003 - 500) / 500 * DIFFUSE_STRENGTH;
+      if (!posAttr || posAttr.count === 0) continue;
 
-        // arr[i] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
-        // arr[i + 1] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
-        // arr[i + 2] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
-        arr[i] = orig[i] + (arr[i] - orig[i]) * (1 - DIFFUSE_DAMP);
-        arr[i + 1] = orig[i + 1] + (arr[i + 1] - orig[i + 1]) * (1 - DIFFUSE_DAMP);
-        arr[i + 2] = orig[i + 2] + (arr[i + 2] - orig[i + 2]) * (1 - DIFFUSE_DAMP);
+      const count = obj.targetPoints;
+      const settled = obj.currentPoints >= count;
+
+      // Start diffusion phase when materialize has just settled (10% = last 10% of vertex indices)
+      if (settled && obj.diffusionPhaseStartedAt == null) {
+        obj.diffusionPhaseStartedAt = now;
+        obj.diffusingStartIndex = Math.floor((1 - DIFFUSE_FRACTION) * count);
+        const start = obj.diffusingStartIndex * 3;
+        const len = (count - obj.diffusingStartIndex) * 3;
+        const arr0 = posAttr.array as Float32Array;
+        obj.originalPositionsDiffuse = arr0.slice(start, start + len);
+      }
+
+      if (obj.diffusionPhaseStartedAt == null || obj.diffusingStartIndex == null) continue;
+
+      const elapsed = now - obj.diffusionPhaseStartedAt;
+
+      // After 3 seconds: hide the diffusing 10% (they disappear)
+      if (elapsed >= DIFFUSE_PHASE_DURATION) {
+        obj.mesh.geometry.setDrawRange(0, obj.diffusingStartIndex);
+        obj.diffusionPhaseStartedAt = undefined;
+        obj.diffusingStartIndex = undefined;
+        obj.originalPositionsDiffuse = undefined;
+        continue;
+      }
+
+      // Apply diffusion only to the last 10% of vertices (random + damp)
+      const arr = posAttr.array as Float32Array;
+      const startIdx = obj.diffusingStartIndex * 3;
+      const orig = obj.originalPositionsDiffuse!;
+      const segLen = (count - obj.diffusingStartIndex) * 3;
+      for (let i = 0; i < segLen; i += 9) {
+        const j = startIdx + i;
+        arr[j] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
+        arr[j + 1] += (Math.random() ) * 2 * DIFFUSE_STRENGTH;
+        arr[j + 2] += (Math.random() - 0.5) * 2 * DIFFUSE_STRENGTH;
+        arr[j] = orig[i] + (arr[j] - orig[i]) * (1 - DIFFUSE_DAMP);
+        arr[j + 1] = orig[i + 1] + (arr[j + 1] - orig[i + 1]) * (1 - DIFFUSE_DAMP);
+        arr[j + 2] = orig[i + 2] + (arr[j + 2] - orig[i + 2]) * (1 - DIFFUSE_DAMP);
       }
       posAttr.needsUpdate = true;
-    });
+    }
 
     this.renderer.render(this.scene, this.camera);
   }

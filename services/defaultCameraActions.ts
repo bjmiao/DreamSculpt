@@ -34,7 +34,6 @@ export class PinchTranslateAction extends CameraAction {
   readonly hand = 'left' as const;
 
   execute(ctx: CameraActionContext): void {
-    console.log('PinchTranslateAction');
     const { delta, renderer } = ctx;
     const id = renderer.getSelectedObjectId();
     if (!id) return;
@@ -71,7 +70,6 @@ export class PalmReleaseAction extends CameraAction {
 
   execute(ctx: CameraActionContext): void {
     const { renderer } = ctx;
-    console.log("PalmReleaseAction");
     // const id = renderer.getSelectedObjectId();
     // if (id) renderer.triggerDiffuse(id);
     // renderer.setSelectedObjectId(null);
