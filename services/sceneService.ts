@@ -19,9 +19,10 @@ export const TYPE_TO_PLY: Record<string, string> = {
   'bell-tower': bellTowerPly,
   'church': churchPly,
   'school-bus': schoolBusPly,
+  'bus': schoolBusPly,
 };
 
-const FORWARD_SPEED = 0.05;
+const FORWARD_SPEED = 0.025;
 const WORLD_Z_RESPAWN = 20;
 const OBJECT_Z_WRAP = 150;
 /** Per-frame random displacement scale for diffusion. */
@@ -34,6 +35,11 @@ const MATERIALIZE_DURATION = 10;
 const DIFFUSE_FRACTION = 0.1;
 /** Duration (seconds) of the diffusion phase; then those particles disappear. */
 const DIFFUSE_PHASE_DURATION = 3;
+/** Object lifetime: min and max seconds before removal starts (random per object). */
+const OBJECT_LIFETIME_MIN = 45;
+const OBJECT_LIFETIME_MAX = 75;
+/** During removal: fraction of total particles to hide per frame. */
+const REMOVAL_PERCENT_PER_FRAME = 0.003;
 /** Orbit: yaw limit ±85°, pitch limit ±45° (radians). */
 const YAW_MIN = -(85 * Math.PI) / 180;
 const YAW_MAX = (85 * Math.PI) / 180;
@@ -49,20 +55,19 @@ const HIGHLIGHT_SIZE_MULT = 1.5;
 /** Particle size in world units (spherical/circular points to avoid square overlap). */
 const POINT_SIZE = 0.04;
 
-/** Create a texture with circular alpha so points render as spheres (no square overlap). */
+/** Create a texture: solid circle (pure color, no gradient outline). */
 function createCirclePointTexture(): THREE.CanvasTexture {
   const size = 64;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.4, 'rgba(255,255,255,0.9)');
-  g.addColorStop(0.7, 'rgba(255,255,255,0.4)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
+  const r = size / 2;
+  ctx.clearRect(0, 0, size, size);
+  ctx.beginPath();
+  ctx.arc(r, r, r - 1, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,1)';
+  ctx.fill();
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   return tex;
@@ -80,6 +85,12 @@ export class DreamRenderer {
     targetPoints: number;
     currentPoints: number;
     loadedAt: number;
+    /** Random lifetime in seconds (20–30) before removal starts. */
+    lifetime: number;
+    /** When gradual removal started; set when loadedAt + lifetime is reached. */
+    removalStartedAt?: number;
+    /** During removal: number of points still visible (decreased 10% per frame). */
+    visiblePoints?: number;
     /** When the "10% diffuse" phase started (after materialize settled). */
     diffusionPhaseStartedAt?: number;
     /** First vertex index of the diffusing 10% (last 10% of points). */
@@ -182,7 +193,7 @@ export class DreamRenderer {
     if (terrainTex) {
       terrainTex.wrapS = THREE.RepeatWrapping;
       terrainTex.wrapT = THREE.RepeatWrapping;
-      terrainTex.repeat.set(505, 505);
+      terrainTex.repeat.set(15, 15);
     }
     if (this.terrain && this.terrainMat) {
       this.lastTerrain = this.terrain;
@@ -226,12 +237,21 @@ export class DreamRenderer {
   private async createPointCloudObject(data: DreamObject, plyLoader: PLYLoader): Promise<void> {
     const plyUrl = TYPE_TO_PLY[data.type];
     let geometry: THREE.BufferGeometry;
+
     let pointCount: number;
 
     if (plyUrl) {
       geometry = await new Promise<THREE.BufferGeometry>((resolve, reject) => {
         plyLoader.load(plyUrl, resolve, undefined, reject);
       });
+
+      // Get size
+      const boundingBox = new THREE.Box3().setFromObject(new THREE.Object3D().add(new THREE.Mesh(geometry)));
+      const size = boundingBox.getSize(new THREE.Vector3());
+      const maxSize = Math.max(size.x, size.y, size.z);
+      data.scale = [data.scale[0] / maxSize * 100, data.scale[1] / maxSize * 100, data.scale[2] / maxSize * 100] as [number, number, number];
+      console.log(plyUrl, data.scale);
+
       const posAttr = geometry.getAttribute('position');
       pointCount = posAttr ? posAttr.count : 0;
       if (pointCount === 0) return;
@@ -272,11 +292,14 @@ export class DreamRenderer {
     cloud.userData = { id: data.id };
 
     this.movingWorld.add(cloud);
+    const loadedAt = this.clock.getElapsedTime();
+    const lifetime = OBJECT_LIFETIME_MIN + Math.random() * (OBJECT_LIFETIME_MAX - OBJECT_LIFETIME_MIN);
     this.objects.set(data.id, {
       mesh: cloud,
       targetPoints: pointCount,
       currentPoints: 0,
-      loadedAt: this.clock.getElapsedTime(),
+      loadedAt,
+      lifetime,
     });
   }
 
@@ -491,6 +514,38 @@ export class DreamRenderer {
         arr[j + 2] = orig[i + 2] + (arr[j + 2] - orig[i + 2]) * (1 - DIFFUSE_DAMP);
       }
       posAttr.needsUpdate = true;
+    }
+
+    // Object lifetime: after lifetime (20–30s), gradually hide 10% of particles per frame, then remove and dispose
+    const idsToDelete: string[] = [];
+    for (const [id, obj] of this.objects.entries()) {
+      const age = now - obj.loadedAt;
+
+      if (obj.removalStartedAt == null) {
+        if (age < obj.lifetime) continue;
+        obj.removalStartedAt = now;
+        const dr = obj.mesh.geometry.drawRange;
+        obj.visiblePoints = dr.count;
+      }
+
+      const removePerFrame = Math.max(1, Math.ceil(obj.targetPoints * REMOVAL_PERCENT_PER_FRAME));
+      obj.visiblePoints = Math.max(0, (obj.visiblePoints ?? obj.targetPoints) - removePerFrame);
+      obj.mesh.geometry.setDrawRange(0, obj.visiblePoints);
+
+      if (obj.visiblePoints <= 0) {
+        idsToDelete.push(id);
+      }
+    }
+    for (const id of idsToDelete) {
+      const obj = this.objects.get(id);
+      if (obj) {
+        this.movingWorld.remove(obj.mesh);
+        obj.mesh.geometry.dispose();
+        if (Array.isArray(obj.mesh.material)) obj.mesh.material.forEach((m) => m.dispose());
+        else obj.mesh.material.dispose();
+        this.objects.delete(id);
+        if (this.selectedObjectId === id) this.selectedObjectId = null;
+      }
     }
 
     this.renderer.render(this.scene, this.camera);

@@ -52,7 +52,7 @@ const SpeechRecognitionCtor =
   (window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition);
 
 const App: React.FC = () => {
-  const [prompt, setPrompt] = useState('A glowing neon forest with floating amethyst crystals and purple rivers');
+  const [prompt, setPrompt] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [state, setState] = useState<AppState>({
     isGenerating: false,
@@ -65,6 +65,7 @@ const App: React.FC = () => {
 
   const recognitionRef = useRef<InstanceType<NonNullable<typeof SpeechRecognitionCtor>> | null>(null);
   const voiceTranscriptRef = useRef('');
+  const promptInputRef = useRef<HTMLInputElement>(null);
   const rendererRef = useRef<DreamRenderer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraActionManagerRef = useRef<CameraActionManager | null>(null);
@@ -232,6 +233,14 @@ const App: React.FC = () => {
     }
   }, [handleGenerate]);
 
+  // Keep prompt input scrolled to the end as voice adds text
+  useEffect(() => {
+    const el = promptInputRef.current;
+    if (!el) return;
+    el.scrollLeft = el.scrollWidth;
+    el.setSelectionRange(prompt.length, prompt.length);
+  }, [prompt]);
+
   return (
     <div className="relative w-full h-screen bg-[#050505]">
       {/* Dreamy galaxy particles background */}
@@ -247,6 +256,7 @@ const App: React.FC = () => {
         </div>
         <div className="flex gap-3 items-center pointer-events-auto">
           <input 
+            ref={promptInputRef}
             type="text" 
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -292,7 +302,7 @@ const App: React.FC = () => {
       {/* FPS */}
       {state.fps != null && (
         <div className="fixed top-3 right-3 text-white/80 text-sm font-mono tabular-nums pointer-events-none select-none">
-          {state.fps} FPS
+          {/* {state.fps} FPS */}
         </div>
       )}
 

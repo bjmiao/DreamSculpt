@@ -144,10 +144,11 @@ export default function HandStatistics({ handData }: HandStatisticsProps) {
   }
 
   return (
-    <div className="hand-statistics-container">
-      <h2>Hand Tracking Statistics</h2>
-      {renderHandStats(handData.left, 'Left')}
-      {renderHandStats(handData.right, 'Right')}
-    </div>
+    // <div>
+    // <h2>Hand Tracking Statistics</h2>
+    // {renderHandStats(handData.left, 'Left')}
+    // {renderHandStats(handData.right, 'Right')}
+    // </div>
+    null
   )
 }

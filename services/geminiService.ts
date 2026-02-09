@@ -26,7 +26,7 @@ export type PromptKind = "scene" | "object";
 
 export const classifyPrompt = async (prompt: string): Promise<PromptKind> => {
   if (1==1) {
-    if (prompt.includes("scene")) return "scene";
+    if (prompt.toLowerCase().includes("scene")) return "scene";
     return "object";
   }  else {
       const response = await ai.models.generateContent({
@@ -54,20 +54,14 @@ export const classifyPrompt = async (prompt: string): Promise<PromptKind> => {
     return "scene";
 };
 
-// /** Convert ArrayBuffer to base64 string (browser-safe, no Node Buffer). */
-// function arrayBufferToBase64(buffer: ArrayBuffer): string {
-//   const bytes = new Uint8Array(buffer);
-//   let binary = "";
-//   for (let i = 0; i < bytes.byteLength; i++) {
-//     binary += String.fromCharCode(bytes[i]);
-//   }
-//   return btoa(binary);
-// }
-
-
 export const parseScenePrompt = async (prompt: string): Promise<SceneGraph> => {
   if (DEBUG_DISABLE_GEMINI) {
-    const response = '{"objects": [{"id": "tree_01","type": "sakura-tree","position": [-25, 0, -45],"scale": [3, 3, 3],"color": "#2D5A27","rotation": [0, 0, 0],"name": "Left Side Tree","maxPoints": 2500},{"id": "tree_02","type": "sakura-tree","position": [25, 0, -45],"scale": [3, 3, 3],"color": "#2D5A27","rotation": [0, 0, 0],"name": "Right Side Tree","maxPoints": 2500},{"id": "bell-tower","type": "bell-tower","position": [0, 0, -60],"scale": [2, 2, 2],"color": "#FF4500","rotation": [0, 0, 0],"name": "Floating Red Ball","maxPoints": 1500},{"id": "sphere_02","type": "church","position": [40, 0, 10],"scale": [2.5, 2.5, 2.5],"color": "#1E90FF","rotation": [0, 0, 0],"name": "Floating Blue Ball","maxPoints": 1500}]}';
+    const response = '{"objects": [ \
+      {"id": "tree_01","type": "sakura-tree","position": [25, 0, 65],"scale": [2, 2, 2],"color": "#2D5A27","rotation": [0, 0, 0],"name": "Left Side Tree","maxPoints": 2500}, \
+      {"id": "tree_02","type": "sakura-tree","position": [25, 0, 45],"scale": [3, 3, 3],"color": "#2D5A27","rotation": [0, 0, 0],"name": "Right Side Tree","maxPoints": 2500}, \
+      {"id": "bell-tower","type": "bell-tower","position": [0, 0, -60],"scale": [2, 2, 2],"color": "#FF4500","rotation": [0, 0, 0],"name": "Floating Red Ball","maxPoints": 1500}, \
+      {"id": "grass","type": "grass","position": [0, 0, -60],"scale": [0.1, 0.1, 0.1],"color": "#FF4500","rotation": [0, 0, 0],"name": "Floating Red Ball","maxPoints": 1500}, \
+      {"id": "sphere_02","type": "church","position": [40, 0, 10],"scale": [6, 6, 6],"color": "#1E90FF","rotation": [0, 0, 0],"name": "Floating Blue Ball","maxPoints": 1500}]}';
     return JSON.parse(response) as SceneGraph;
   } else {
     const response = await ai.models.generateContent({
@@ -94,9 +88,9 @@ export const parseScenePrompt = async (prompt: string): Promise<SceneGraph> => {
                 scale: { 
                   type: Type.ARRAY, 
                   items: { type: Type.NUMBER },
-                  description: "[x, y, z] - x, y, z 0.1 to 1"
+                  description: "[x, y, z] - x, y, z 0.1 to 10, based on the size of actual object"
                 },
-                color: { type: Type.STRING, description: "Hex color. One of: #F1EFEB, #DDD5D5, #F6F6F6, #EDEDED, #E8E1D5, #D3DCE8"},
+                color: { type: Type.STRING, description: "Hex color. One of: #F7E5EC, #FFD9CC, #EEBEC6, #FDBA90, #D28A8C, #F9D4B2"},
                 rotation: { 
                   type: Type.ARRAY, 
                   items: { type: Type.NUMBER },
@@ -123,7 +117,7 @@ export const generateSkyTexture = async (ambience: string): Promise<string> => {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
-        parts: [{ text: `A surreal, dreamy, ethereal sky texture for a ${ambience} scene. High resolution, vibrant but soft colors, nebula-like.` }]
+        parts: [{ text: `A realistic sky texture given the ambience: ${ambience}. High resolution, vibrant but soft colors.` }]
       },
       config: {
         imageConfig: { aspectRatio: "16:9" }
@@ -160,7 +154,7 @@ export const generateTerrainTexture = async (ambience: string): Promise<string> 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
-        parts: [{ text: `A seamless tiled ground texture for a ${ambience} dream world. Subtle patterns, glowing veins, or soft textures.` }]
+        parts: [{ text: `A seamless texture for world terrain given the ambience: ${ambience}. Subtle patterns, glowing veins, or soft textures.` }]
       },
       config: {
         imageConfig: { aspectRatio: "1:1" }
