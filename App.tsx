@@ -296,6 +296,19 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Hand gesture instructions — bottom left */}
+      <div className="fixed bottom-4 left-4 z-10 pointer-events-none select-none text-white/70 text-xs font-mono backdrop-blur-sm bg-black/30 border border-white/10 rounded-lg px-3 py-2 max-w-[200px]">
+        <div className="font-semibold text-white/90 mb-1">Hand controls</div>
+        <div>Right hand: Navigation</div>
+        <div>→  Palm move → orbit</div>
+        <div>→  Fist up/down → zoom</div>
+        <br />
+        <div>Left hand: Manipulation (Hover to select object)</div>
+        <div>→  Pinch + move → move object</div>
+        <div>→  Fist rotate → rotate</div>
+        <div>→  Both-hand pinch → scale</div>
+      </div>
+
       {/* UI Elements */}
       <HandMonitor videoRef={videoRef} canvasRef={canvasRef} isTracking={isTracking} />
 
